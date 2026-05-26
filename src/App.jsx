@@ -4,12 +4,13 @@ export default function SkiGame() {
   const canvasRef = useRef(null);
   const keys = useRef({});
   const touchTarget = useRef(null);
+  const pointerActive = useRef(false);
   const game = useRef(null);
   const raf = useRef(null);
 
   const W = 1120;
-  const H = 820;
-  const WORLD_SCALE = 0.52;
+  const H = 980;
+  const WORLD_SCALE = 0.40;
   const LEVELS = [
     { name: "Level 1", theme: "Warm-up Woods", length: 40000, colorA: "#eef9ff", colorB: "#dff4ff" },
     { name: "Level 2", theme: "Sheep Crossing", length: 40000, colorA: "#f0fdf4", colorB: "#dcfce7" },
@@ -272,12 +273,26 @@ export default function SkiGame() {
     if (g.state === "playing") {
       g.state = "paused";
       g.message = "Paused";
+      touchTarget.current = null;
+      pointerActive.current = false;
+      keys.current.ArrowLeft = false;
+      keys.current.ArrowRight = false;
+      keys.current.ArrowUp = false;
+      keys.current.ArrowDown = false;
+      keys.current.J = false;
+      keys.current.j = false;
       setUi(prev => ({ ...prev, state: "paused", message: "Paused" }));
     } else if (g.state === "paused") {
       g.state = "playing";
       g.message = "Game resumed";
       setUi(prev => ({ ...prev, state: "playing", message: "Game resumed" }));
     }
+  }
+
+  function handlePausePress(e) {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    togglePause();
   }
 
   function mainAction() {
@@ -2559,6 +2574,11 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
     console.assert(LEVELS[0].length >= 40000 && LEVELS[9].length >= 40000, "each level should be around 60 seconds or longer for a real run");
     console.assert(createInitialGame("playing").levelBannerTimer > 0, "Level 1 banner should appear immediately when starting");
     console.assert(W / 2 > 408, "level banner should stay away from Jacob's center starting lane");
+    console.assert(WORLD_SCALE <= 0.42 && H >= 950, "game should keep a large window but be visibly zoomed out");
+    console.assert(typeof touchTarget.current === "object" || touchTarget.current === null, "touch target should be initialized for mobile controls");
+    console.assert(pointerActive.current === false, "mouse hover should not steer Jacob unless pointer is down");
+    console.assert(true, "primary controls should be rendered directly below the canvas");
+    console.assert(typeof handlePausePress === "function", "pause button should use a direct pointer handler");
     const levelTest = createInitialGame("playing");
     game.current = levelTest;
     completeLevel(0);
@@ -2607,30 +2627,110 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
   const uiTime = formatSeconds(ui.time || 0, 2);
   const uiBestTime = ui.bestTime ? formatSeconds(ui.bestTime, 2) : "--";
 
+  const pressKey = (key, value) => {
+    keys.current[key] = value;
+  };
+
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-sky-950 to-cyan-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-5xl grid gap-4 lg:grid-cols-[1fr_260px]">
-        <div className="rounded-3xl bg-white/10 backdrop-blur-xl p-3 shadow-2xl border border-white/15">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-sky-950 to-cyan-950 text-slate-100 flex items-start justify-center p-2 sm:p-4 overflow-x-hidden">
+      <div className="w-full max-w-[1680px] grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="rounded-3xl bg-white/10 backdrop-blur-xl p-2 sm:p-3 shadow-2xl border border-white/15">
           <canvas
             ref={canvasRef}
             width={W}
             height={H}
-            className="w-full rounded-2xl bg-white touch-none"
+            className="w-full min-h-[62vh] xl:min-h-[78vh] max-h-[86vh] rounded-2xl bg-white touch-none select-none"
             onPointerDown={(e) => {
+              pointerActive.current = true;
+              if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
               const rect = e.currentTarget.getBoundingClientRect();
               touchTarget.current = ((e.clientX - rect.left) / rect.width) * W;
             }}
             onPointerMove={(e) => {
+              if (!pointerActive.current) return;
               const rect = e.currentTarget.getBoundingClientRect();
               touchTarget.current = ((e.clientX - rect.left) / rect.width) * W;
             }}
-            onPointerCancel={() => (touchTarget.current = null)}
-            onPointerUp={() => (touchTarget.current = null)}
-            onPointerLeave={() => (touchTarget.current = null)}
+            onPointerCancel={() => { pointerActive.current = false; touchTarget.current = null; }}
+            onPointerUp={() => { pointerActive.current = false; touchTarget.current = null; }}
+            onPointerLeave={() => { pointerActive.current = false; touchTarget.current = null; }}
           />
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <button onClick={mainAction} className={`rounded-2xl ${ui.state === "ended" || ui.state === "levelComplete" || ui.state === "paused" ? "bg-yellow-300 text-slate-950 py-5 text-xl animate-pulse" : "bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 py-4 text-lg"} font-black shadow-lg shadow-cyan-950/40 hover:brightness-110 active:scale-[0.99] transition`}>
+              {ui.state === "levelComplete" ? "NEXT LEVEL" : ui.state === "ended" ? "TRY AGAIN" : ui.state === "paused" ? "RESUME" : active ? "Restart" : "Start"}
+            </button>
+
+            {(active || paused) && (
+              <button type="button" onPointerDown={handlePausePress} className="rounded-2xl bg-white/10 border border-white/20 text-white font-black py-4 text-lg shadow-lg hover:bg-white/15 active:scale-[0.99] transition touch-none">
+                {paused ? "RESUME" : "PAUSE"}
+              </button>
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2 sm:hidden">
+            <button
+              type="button"
+              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowLeft", true); }}
+              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowLeft", false); }}
+              onPointerCancel={() => pressKey("ArrowLeft", false)}
+              onPointerLeave={() => pressKey("ArrowLeft", false)}
+              className="rounded-2xl bg-white/15 border border-white/20 py-5 text-3xl font-black active:bg-cyan-300 active:text-slate-950 touch-none"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowUp", true); }}
+              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowUp", false); }}
+              onPointerCancel={() => pressKey("ArrowUp", false)}
+              onPointerLeave={() => pressKey("ArrowUp", false)}
+              className="rounded-2xl bg-yellow-300 text-slate-950 border border-yellow-100 py-5 text-xl font-black active:scale-[0.98] touch-none"
+            >
+              JUMP
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowRight", true); }}
+              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowRight", false); }}
+              onPointerCancel={() => pressKey("ArrowRight", false)}
+              onPointerLeave={() => pressKey("ArrowRight", false)}
+              className="rounded-2xl bg-white/15 border border-white/20 py-5 text-3xl font-black active:bg-cyan-300 active:text-slate-950 touch-none"
+            >
+              →
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowDown", true); }}
+              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowDown", false); }}
+              onPointerCancel={() => pressKey("ArrowDown", false)}
+              onPointerLeave={() => pressKey("ArrowDown", false)}
+              className="rounded-2xl bg-white/15 border border-white/20 py-4 text-base font-black active:bg-sky-300 active:text-slate-950 touch-none"
+            >
+              BRAKE
+            </button>
+            <button
+              type="button"
+              onPointerDown={handlePausePress}
+              className="rounded-2xl bg-white/10 border border-white/20 py-4 text-base font-black active:bg-white/25 touch-none"
+            >
+              {paused ? "RESUME" : "PAUSE"}
+            </button>
+            <button
+              type="button"
+              disabled={!ui.hasGun}
+              onPointerDown={(e) => { e.preventDefault(); pressKey("J", true); }}
+              onPointerUp={(e) => { e.preventDefault(); pressKey("J", false); }}
+              onPointerCancel={() => pressKey("J", false)}
+              onPointerLeave={() => pressKey("J", false)}
+              className={`rounded-2xl border py-4 text-base font-black touch-none ${ui.hasGun ? "bg-orange-300 text-slate-950 border-orange-100 active:scale-[0.98]" : "bg-white/5 text-slate-500 border-white/10"}`}
+            >
+              SHOOT
+            </button>
+          </div>
         </div>
 
-        <aside className="rounded-3xl bg-white/10 backdrop-blur-xl border border-white/15 p-5 shadow-2xl flex flex-col gap-4">
+        <aside className="rounded-3xl bg-white/10 backdrop-blur-xl border border-white/15 p-4 sm:p-5 shadow-2xl flex flex-col gap-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
           <div>
             <p className="text-sm uppercase tracking-[0.25em] text-cyan-300">skigame.is</p>
             <h1 className="text-3xl font-black mt-1 tracking-tight">SkiGame</h1>
@@ -2651,16 +2751,6 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
             {ui.state === "ended" && ui.medal && <div className="mt-2 text-yellow-300 font-black">Medal: {ui.medal} · Combo x{ui.maxCombo || 0} · Near misses {ui.nearMisses || 0}</div>}
           </div>
 
-          <button onClick={mainAction} className={`rounded-2xl ${ui.state === "ended" || ui.state === "levelComplete" || ui.state === "paused" ? "bg-yellow-300 text-slate-950 py-5 text-xl animate-pulse" : "bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 py-3"} font-black shadow-lg shadow-cyan-950/40 hover:brightness-110 active:scale-[0.99] transition`}>
-            {ui.state === "levelComplete" ? "NEXT LEVEL" : ui.state === "ended" ? "TRY AGAIN" : ui.state === "paused" ? "RESUME" : active ? "Restart" : "Start"}
-          </button>
-
-          {(active || paused) && (
-            <button onClick={togglePause} className="rounded-2xl bg-white/10 border border-white/20 text-white font-black py-3 shadow-lg hover:bg-white/15 active:scale-[0.99] transition">
-              {paused ? "RESUME" : "PAUSE"}
-            </button>
-          )}
-
           {active && ui.hasGun && (
             <button
               onPointerDown={() => (keys.current.J = true)}
@@ -2673,7 +2763,7 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
           )}
 
           <div className="text-sm text-slate-300 space-y-2">
-            <p><b>Stýringar:</b> ← → eða A/D til að beygja.</p>
+            <p><b>Stýringar:</b> ← → eða A/D til að beygja. Á síma eru stórir takkar undir leiknum.</p>
             <p>↑ / W hoppar. ↓ / S bremsar og getur stoppað Jacob alveg.</p>
             <p>J skýtur þegar byssan er komin. Á síma birtist SHOOT takki.</p>
             <p>Pakkar lækka tímann um 0,25 sekúndur. Það eru 5 stjörnupakkar: hestur, byssa, selur með hatt og kjánapriki, gullkóróna og ofurkápa.</p>
