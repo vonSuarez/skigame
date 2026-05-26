@@ -5,8 +5,10 @@ export default function SkiGame() {
   const keys = useRef({});
   const touchTarget = useRef(null);
   const pointerActive = useRef(false);
+  const touchGesture = useRef({ startX: 0, startY: 0, startT: 0, lastTapT: 0 });
   const game = useRef(null);
   const raf = useRef(null);
+  const isMobile = useRef(false);
 
   const W = 1120;
   const H = 980;
@@ -128,13 +130,17 @@ export default function SkiGame() {
     return { ...base, r: 16 };
   }
 
+  function getMobileSpeedBonus() {
+    return isMobile.current ? 1.25 : 1;
+  }
+
   function createInitialGame(state = "ready") {
     const best = Number(localStorage.getItem("skigame-best") || 0);
     const bestTime = Number(localStorage.getItem("skigame-best-time") || 0);
     return {
       state,
       t: 0,
-      speed: state === "playing" ? 7.8 : 0,
+      speed: state === "playing" ? 7.8 * getMobileSpeedBonus() : 0,
       meters: 0,
       score: 0,
       packages: 0,
@@ -224,7 +230,7 @@ export default function SkiGame() {
     g.state = "playing";
     g.currentLevel = nextLevel;
     g.camera = start + 6;
-    g.speed = 7.8 + nextLevel * 0.28;
+    g.speed = (7.8 + nextLevel * 0.28) * getMobileSpeedBonus();
     g.skier.x = W / 2 - 90;
     g.skier.y = 125;
     g.skier.vx = 0;
@@ -275,6 +281,7 @@ export default function SkiGame() {
       g.message = "Paused";
       touchTarget.current = null;
       pointerActive.current = false;
+      keys.current.mobileBrakeUntil = 0;
       keys.current.ArrowLeft = false;
       keys.current.ArrowRight = false;
       keys.current.ArrowUp = false;
@@ -505,7 +512,7 @@ export default function SkiGame() {
     const left = keys.current.ArrowLeft || keys.current.a || keys.current.A || (touchX !== null && touchX < W * 0.38);
     const right = keys.current.ArrowRight || keys.current.d || keys.current.D || (touchX !== null && touchX > W * 0.62);
     const jumpPressed = keys.current.ArrowUp || keys.current.w || keys.current.W;
-    const brake = keys.current.ArrowDown || keys.current.s || keys.current.S;
+    const brake = keys.current.ArrowDown || keys.current.s || keys.current.S || (keys.current.mobileBrakeUntil && g.t < keys.current.mobileBrakeUntil);
     const trick = keys.current[" "] || keys.current.Space;
     const shootPressed = keys.current.j || keys.current.J;
 
@@ -581,7 +588,8 @@ export default function SkiGame() {
     const capeBonus = g.skier.hasCape ? 0.85 : 0;
     const iceBonus = g.skier.iceTimer > 0 ? 3.4 : 0;
     const turnSlowdown = turnAmount * 3.7 * (g.skier.iceTimer > 0 ? 0.25 : 1);
-    const normalTargetSpeed = 6.9 + horseBonus + catBonus + sealBonus + crownBonus + capeBonus + iceBonus + Math.min(4.1, g.meters / 1450) + straightBonus * 2.6 + straightStreakBonus - turnSlowdown;
+    const mobileSpeedBonus = isMobile.current ? 1.18 : 1;
+    const normalTargetSpeed = (6.9 + horseBonus + catBonus + sealBonus + crownBonus + capeBonus + iceBonus + Math.min(4.1, g.meters / 1450) + straightBonus * 2.6 + straightStreakBonus - turnSlowdown) * mobileSpeedBonus;
     const baseTargetSpeed = brake ? (g.skier.iceTimer > 0 ? 2.2 : 0) : normalTargetSpeed;
     const boostMultiplier = g.skier.boostTimer > 0 && !brake ? 1.5 : 1;
     g.speed += (baseTargetSpeed * boostMultiplier - g.speed) * (brake ? 0.085 : 0.034);
@@ -2579,6 +2587,8 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
     console.assert(pointerActive.current === false, "mouse hover should not steer Jacob unless pointer is down");
     console.assert(true, "primary controls should be rendered directly below the canvas");
     console.assert(typeof handlePausePress === "function", "pause button should use a direct pointer handler");
+    console.assert(typeof tapJump === "function" && typeof updateTouchSteer === "function", "mobile touchpad controls should support steering and double-tap jump");
+    console.assert(getMobileSpeedBonus() >= 1, "mobile speed bonus should never slow the game down");
     const levelTest = createInitialGame("playing");
     game.current = levelTest;
     completeLevel(0);
@@ -2592,6 +2602,7 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
   }
 
   useEffect(() => {
+    isMobile.current = window.matchMedia?.("(pointer: coarse), (max-width: 640px)")?.matches || false;
     runDevAssertions();
     const initial = createInitialGame("ready");
     game.current = initial;
@@ -2631,33 +2642,71 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
     keys.current[key] = value;
   };
 
+  const tapJump = () => {
+    keys.current.ArrowUp = true;
+    window.setTimeout(() => {
+      keys.current.ArrowUp = false;
+    }, 120);
+  };
+
+  const shootOnce = () => {
+    if (!ui.hasGun) return;
+    keys.current.J = true;
+    window.setTimeout(() => {
+      keys.current.J = false;
+    }, 120);
+  };
+
+  const updateTouchSteer = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    touchTarget.current = ((e.clientX - rect.left) / rect.width) * W;
+  };
+
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-sky-950 to-cyan-950 text-slate-100 flex items-start justify-center p-2 sm:p-4 overflow-x-hidden">
-      <div className="w-full max-w-[1680px] grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="rounded-3xl bg-white/10 backdrop-blur-xl p-2 sm:p-3 shadow-2xl border border-white/15">
+    <div className="min-h-[100svh] w-full bg-gradient-to-br from-slate-950 via-sky-950 to-cyan-950 text-slate-100 flex items-start justify-center p-0 sm:p-4 overflow-x-hidden overscroll-none">
+      <div className="w-full max-w-[1680px] grid gap-0 sm:gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-h-[100svh] sm:min-h-0 rounded-none sm:rounded-3xl bg-white/10 backdrop-blur-xl p-0 sm:p-3 shadow-2xl border-0 sm:border border-white/15">
           <canvas
             ref={canvasRef}
             width={W}
             height={H}
-            className="w-full min-h-[62vh] xl:min-h-[78vh] max-h-[86vh] rounded-2xl bg-white touch-none select-none"
+            className="w-full h-[calc(100svh-132px)] sm:h-auto sm:min-h-[62vh] xl:min-h-[78vh] sm:max-h-[86vh] rounded-none sm:rounded-2xl bg-white touch-none select-none block"
             onPointerDown={(e) => {
+              e.preventDefault();
               pointerActive.current = true;
               if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
               const rect = e.currentTarget.getBoundingClientRect();
+              const now = performance.now();
+              touchGesture.current.startX = e.clientX;
+              touchGesture.current.startY = e.clientY;
+              touchGesture.current.startT = now;
+              if (now - touchGesture.current.lastTapT < 280) {
+                tapJump();
+                touchGesture.current.lastTapT = 0;
+              } else {
+                touchGesture.current.lastTapT = now;
+              }
               touchTarget.current = ((e.clientX - rect.left) / rect.width) * W;
             }}
             onPointerMove={(e) => {
               if (!pointerActive.current) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              touchTarget.current = ((e.clientX - rect.left) / rect.width) * W;
+              e.preventDefault();
+              updateTouchSteer(e);
+              const dy = e.clientY - touchGesture.current.startY;
+              if (dy < -42) keys.current.mobileBrakeUntil = (game.current?.t || 0) + 48;
             }}
             onPointerCancel={() => { pointerActive.current = false; touchTarget.current = null; }}
-            onPointerUp={() => { pointerActive.current = false; touchTarget.current = null; }}
+            onPointerUp={(e) => {
+              const dy = e.clientY - touchGesture.current.startY;
+              if (dy < -42) keys.current.mobileBrakeUntil = (game.current?.t || 0) + 55;
+              pointerActive.current = false;
+              touchTarget.current = null;
+            }}
             onPointerLeave={() => { pointerActive.current = false; touchTarget.current = null; }}
           />
 
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <button onClick={mainAction} className={`rounded-2xl ${ui.state === "ended" || ui.state === "levelComplete" || ui.state === "paused" ? "bg-yellow-300 text-slate-950 py-5 text-xl animate-pulse" : "bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 py-4 text-lg"} font-black shadow-lg shadow-cyan-950/40 hover:brightness-110 active:scale-[0.99] transition`}>
+          <div className="grid grid-cols-2 gap-2 p-2 sm:mt-3 sm:p-0">
+            <button onClick={mainAction} className={`rounded-2xl ${ui.state === "ended" || ui.state === "levelComplete" || ui.state === "paused" ? "bg-yellow-300 text-slate-950 py-4 sm:py-5 text-lg sm:text-xl animate-pulse" : "bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 py-3 sm:py-4 text-base sm:text-lg"} font-black shadow-lg shadow-cyan-950/40 hover:brightness-110 active:scale-[0.99] transition`}>
               {ui.state === "levelComplete" ? "NEXT LEVEL" : ui.state === "ended" ? "TRY AGAIN" : ui.state === "paused" ? "RESUME" : active ? "Restart" : "Start"}
             </button>
 
@@ -2668,69 +2717,21 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2 sm:hidden">
-            <button
-              type="button"
-              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowLeft", true); }}
-              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowLeft", false); }}
-              onPointerCancel={() => pressKey("ArrowLeft", false)}
-              onPointerLeave={() => pressKey("ArrowLeft", false)}
-              className="rounded-2xl bg-white/15 border border-white/20 py-5 text-3xl font-black active:bg-cyan-300 active:text-slate-950 touch-none"
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowUp", true); }}
-              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowUp", false); }}
-              onPointerCancel={() => pressKey("ArrowUp", false)}
-              onPointerLeave={() => pressKey("ArrowUp", false)}
-              className="rounded-2xl bg-yellow-300 text-slate-950 border border-yellow-100 py-5 text-xl font-black active:scale-[0.98] touch-none"
-            >
-              JUMP
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowRight", true); }}
-              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowRight", false); }}
-              onPointerCancel={() => pressKey("ArrowRight", false)}
-              onPointerLeave={() => pressKey("ArrowRight", false)}
-              className="rounded-2xl bg-white/15 border border-white/20 py-5 text-3xl font-black active:bg-cyan-300 active:text-slate-950 touch-none"
-            >
-              →
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => { e.preventDefault(); pressKey("ArrowDown", true); }}
-              onPointerUp={(e) => { e.preventDefault(); pressKey("ArrowDown", false); }}
-              onPointerCancel={() => pressKey("ArrowDown", false)}
-              onPointerLeave={() => pressKey("ArrowDown", false)}
-              className="rounded-2xl bg-white/15 border border-white/20 py-4 text-base font-black active:bg-sky-300 active:text-slate-950 touch-none"
-            >
-              BRAKE
-            </button>
-            <button
-              type="button"
-              onPointerDown={handlePausePress}
-              className="rounded-2xl bg-white/10 border border-white/20 py-4 text-base font-black active:bg-white/25 touch-none"
-            >
-              {paused ? "RESUME" : "PAUSE"}
-            </button>
-            <button
-              type="button"
-              disabled={!ui.hasGun}
-              onPointerDown={(e) => { e.preventDefault(); pressKey("J", true); }}
-              onPointerUp={(e) => { e.preventDefault(); pressKey("J", false); }}
-              onPointerCancel={() => pressKey("J", false)}
-              onPointerLeave={() => pressKey("J", false)}
-              className={`rounded-2xl border py-4 text-base font-black touch-none ${ui.hasGun ? "bg-orange-300 text-slate-950 border-orange-100 active:scale-[0.98]" : "bg-white/5 text-slate-500 border-white/10"}`}
-            >
-              SHOOT
-            </button>
+          <div className="px-3 pb-3 text-[11px] text-cyan-100/80 sm:hidden text-center">
+            Touchpad: tap left/right to steer · double tap to jump · swipe up to brake{ui.hasGun ? " · tap SHOOT to fire" : ""}
+            {ui.hasGun && (
+              <button
+                type="button"
+                onPointerDown={(e) => { e.preventDefault(); shootOnce(); }}
+                className="ml-2 rounded-xl bg-orange-300 text-slate-950 px-3 py-1 font-black touch-none"
+              >
+                SHOOT
+              </button>
+            )}
           </div>
         </div>
 
-        <aside className="rounded-3xl bg-white/10 backdrop-blur-xl border border-white/15 p-4 sm:p-5 shadow-2xl flex flex-col gap-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+        <aside className="hidden sm:flex rounded-3xl bg-white/10 backdrop-blur-xl border border-white/15 p-4 sm:p-5 shadow-2xl flex-col gap-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
           <div>
             <p className="text-sm uppercase tracking-[0.25em] text-cyan-300">skigame.is</p>
             <h1 className="text-3xl font-black mt-1 tracking-tight">SkiGame</h1>
@@ -2763,9 +2764,9 @@ if (o.type === "ball" || o.type === "bullet" || o.type === "pizza") {
           )}
 
           <div className="text-sm text-slate-300 space-y-2">
-            <p><b>Stýringar:</b> ← → eða A/D til að beygja. Á síma eru stórir takkar undir leiknum.</p>
-            <p>↑ / W hoppar. ↓ / S bremsar og getur stoppað Jacob alveg.</p>
-            <p>J skýtur þegar byssan er komin. Á síma birtist SHOOT takki.</p>
+            <p><b>Stýringar:</b> ← → eða A/D til að beygja. Á síma er allur skjárinn touchpad.</p>
+            <p>↑ / W hoppar. ↓ / S bremsar og getur stoppað Jacob alveg. Á síma: tvísmelltu til að hoppa og swipe-aðu upp til að bremsa.</p>
+            <p>J skýtur þegar byssan er komin. Á síma birtist lítill SHOOT takki þegar byssan er komin.</p>
             <p>Pakkar lækka tímann um 0,25 sekúndur. Það eru 5 stjörnupakkar: hestur, byssa, selur með hatt og kjánapriki, gullkóróna og ofurkápa.</p>
             <p>Farðu nálægt hindrunum án þess að rekast á þær til að fá Near miss combo og stærri stig.</p>
             <p>Í lokin færðu medalíu: Bronze, Silver, Gold, Crazy Gold eða Bigfoot Master.</p>
